@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // - uid: string (required)
+    // - displayName: string
+    // - email: string (required, PII)
+    // - photoURL: string
+    // - bio: string
+    // - createdAt: timestamp (required)
+    //
+    // Collection: videos
+    // - id: string (required)
+    // - title: string (required)
+    // - description: string
+    // - thumbnailUrl: string
+    // - videoUrl: string (required)
+    // - authorId: string (required)
+    // - authorName: string
+    // - views: number
+    // - likes: number
+    // - createdAt: timestamp (required)
+    // - tags: list<string>
+    //
+    // Collection: videos/{videoId}/comments
+    // - id: string (required)
+    // - videoId: string (required)
+    // - authorId: string (required)
+    // - authorName: string
+    // - text: string (required)
+    // - createdAt: timestamp (required)
+    //
+    // Collection: subscriptions
+    // - id: string (required)
+    // - subscriberId: string (required)
+    // - creatorId: string (required)
+    // - createdAt: timestamp (required)
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "oreviera1@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidVideo(data) {
+      return data.keys().hasAll(['id', 'title', 'videoUrl', 'authorId', 'createdAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.videoUrl is string &&
+             data.authorId == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['id', 'videoId', 'authorId', 'text', 'createdAt']) &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 1000 &&
+             data.authorId == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidSubscription(data) {
+      return data.keys().hasAll(['id', 'subscriberId', 'creatorId', 'createdAt']) &&
+             data.subscriberId == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // PII Protection: Only owner can read their own profile if it contains email
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      request.resource.data.email == resource.data.email;
+    }
+
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidVideo(request.resource.data);
+      allow update: if (isAuthenticated() && resource.data.authorId == request.auth.uid && isValidVideo(request.resource.data)) ||
+                      (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'likes']));
+      allow delete: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isAdmin());
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isAuthenticated() && isValidComment(request.resource.data);
+        allow update, delete: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isAdmin());
+      }
+    }
+
+    match /subscriptions/{subId} {
+      allow read: if isAuthenticated() && (resource.data.subscriberId == request.auth.uid || resource.data.creatorId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.subscriberId == request.auth.uid && request.resource.data.creatorId != request.auth.uid;
+      allow delete: if isAuthenticated() && (resource.data.subscriberId == request.auth.uid || isAdmin());
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated(); // In a real app, this would be restricted to server-side or specific triggers
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+  }
+}

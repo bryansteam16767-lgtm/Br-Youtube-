@@ -1,5 +1,5 @@
 {
-  "name": "",
-  "description": "",
-  "requestFramePermissions": []
+  "name": "TubeGen AI",
+  "description": "A next-generation video platform powered by Gemini and Veo. Create, watch, and interact with AI-generated content.",
+  "requestFramePermissions": ["camera", "microphone"]
 }
