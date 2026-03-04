@@ -2,17 +2,29 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile information",
+      "description": "Sensitive user information",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "Unique identifier for the user" },
-        "displayName": { "type": "string", "description": "User's display name" },
-        "email": { "type": "string", "description": "User's email address" },
-        "photoURL": { "type": "string", "description": "URL to user's profile picture" },
-        "bio": { "type": "string", "description": "User's short biography" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "When the user account was created" }
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "createdAt"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "Public channel information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "bannerURL": { "type": "string" },
+        "bio": { "type": "string" },
+        "subscriberCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "createdAt"]
     },
     "Video": {
       "title": "Video",
@@ -80,7 +92,11 @@
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "User profiles"
+      "description": "Sensitive user profiles"
+    },
+    "/channels/{userId}": {
+      "schema": "Channel",
+      "description": "Public channel profiles"
     },
     "/videos/{videoId}": {
       "schema": "Video",

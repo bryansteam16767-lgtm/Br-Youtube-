@@ -99,6 +99,13 @@ service cloud.firestore {
                       request.resource.data.email == resource.data.email;
     }
 
+    match /channels/{userId} {
+      allow read: if true;
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin() || 
+                      (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscriberCount']));
+    }
+
     match /videos/{videoId} {
       allow read: if true;
       allow create: if isAuthenticated() && isValidVideo(request.resource.data);

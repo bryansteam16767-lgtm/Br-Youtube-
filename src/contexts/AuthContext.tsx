@@ -17,15 +17,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // Sync user to Firestore
+        // Sync user to Firestore (private)
         const userRef = doc(db, 'users', user.uid);
         await setDoc(userRef, {
           uid: user.uid,
-          displayName: user.displayName,
           email: user.email,
+          createdAt: Timestamp.now(),
+        }, { merge: true });
+
+        // Sync channel to Firestore (public)
+        const channelRef = doc(db, 'channels', user.uid);
+        await setDoc(channelRef, {
+          uid: user.uid,
+          displayName: user.displayName,
           photoURL: user.photoURL,
           createdAt: Timestamp.now(),
         }, { merge: true });
+
         setUser(user);
       } else {
         setUser(null);

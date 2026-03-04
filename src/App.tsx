@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Menu, Video, Bell, User, Home, Compass, PlaySquare, Clock, ThumbsUp, MessageSquare, Send, Sparkles, Wand2, Mic, Volume2 } from 'lucide-react';
+import { Search, Menu, Video, Bell, User, Home, Compass, PlaySquare, Clock, ThumbsUp, MessageSquare, Send, Sparkles, Wand2, Mic, Volume2, Share2, Camera, Edit3, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { geminiService } from './services/geminiService';
-import { db, collection, query, orderBy, onSnapshot, addDoc, Timestamp, OperationType, handleFirestoreError, updateDoc, doc, where, limit, getDocs, deleteDoc } from './firebase';
+import { db, collection, query, orderBy, onSnapshot, addDoc, Timestamp, OperationType, handleFirestoreError, updateDoc, doc, where, limit, getDocs, deleteDoc, getDoc } from './firebase';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -57,6 +57,165 @@ function cn(...inputs: any[]) {
 
 // --- Components ---
 
+interface ChannelData {
+  uid: string;
+  displayName: string;
+  photoURL: string;
+  bannerURL?: string;
+  bio?: string;
+  subscriberCount?: number;
+  createdAt: any;
+}
+
+const ProfilePage = ({ channelId, onClose, onVideoClick, onOpenProfile }: { channelId: string, onClose: () => void, onVideoClick: (v: VideoData) => void, onOpenProfile: (id: string) => void }) => {
+  const { user } = useAuth();
+  const [channel, setChannel] = useState<ChannelData | null>(null);
+  const [videos, setVideos] = useState<VideoData[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editBio, setEditBio] = useState('');
+  const [editName, setEditName] = useState('');
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'channels', channelId), (doc) => {
+      if (doc.exists()) {
+        const data = doc.data() as ChannelData;
+        setChannel(data);
+        setEditBio(data.bio || '');
+        setEditName(data.displayName || '');
+      }
+    });
+    return () => unsubscribe();
+  }, [channelId]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'videos'), where('authorId', '==', channelId), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setVideos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VideoData)));
+    });
+    return () => unsubscribe();
+  }, [channelId]);
+
+  const handleUpdateProfile = async () => {
+    try {
+      await updateDoc(doc(db, 'channels', channelId), {
+        displayName: editName,
+        bio: editBio
+      });
+      setIsEditing(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'channels');
+    }
+  };
+
+  const handleShare = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url);
+    alert('Application link copied to clipboard!');
+  };
+
+  if (!channel) return null;
+
+  return (
+    <div className="fixed inset-0 bg-white z-[70] overflow-y-auto pt-14">
+      <div className="w-full h-48 sm:h-64 bg-gray-200 relative">
+        {channel.bannerURL ? (
+          <img src={channel.bannerURL} className="w-full h-full object-cover" alt="Banner" />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-r from-gray-200 to-gray-300" />
+        )}
+        <button 
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 bg-black/50 text-white rounded-full hover:bg-black/70"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="flex flex-col sm:flex-row gap-6 -mt-12 sm:-mt-16 items-start sm:items-end mb-8">
+          <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-lg">
+            <img src={channel.photoURL} className="w-full h-full object-cover" alt={channel.displayName} />
+          </div>
+          <div className="flex-1 pb-2">
+            {isEditing ? (
+              <div className="space-y-2">
+                <input 
+                  value={editName} 
+                  onChange={e => setEditName(e.target.value)}
+                  className="text-2xl font-bold border-b border-gray-300 outline-none focus:border-black w-full"
+                />
+                <textarea 
+                  value={editBio} 
+                  onChange={e => setEditBio(e.target.value)}
+                  className="text-sm text-gray-600 border border-gray-200 rounded p-2 w-full outline-none focus:border-black"
+                  placeholder="Tell us about your channel..."
+                />
+                <div className="flex gap-2">
+                  <button onClick={handleUpdateProfile} className="bg-black text-white px-4 py-1 rounded-full text-sm font-bold">Save</button>
+                  <button onClick={() => setIsEditing(false)} className="bg-gray-100 px-4 py-1 rounded-full text-sm font-bold">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h1 className="text-2xl sm:text-3xl font-bold mb-1">{channel.displayName}</h1>
+                <p className="text-sm text-gray-500 mb-2">@channel_{channel.uid.slice(0, 5)} • {channel.subscriberCount || 0} subscribers • {videos.length} videos</p>
+                <p className="text-sm text-gray-600 max-w-2xl">{channel.bio || 'No bio yet.'}</p>
+              </>
+            )}
+          </div>
+          <div className="flex gap-2 pb-2">
+            {user?.uid === channelId ? (
+              <button 
+                onClick={() => setIsEditing(true)}
+                className="flex items-center gap-2 bg-gray-100 px-4 py-2 rounded-full text-sm font-bold hover:bg-gray-200"
+              >
+                <Edit3 size={16} />
+                Edit Profile
+              </button>
+            ) : (
+              <button className="bg-black text-white px-6 py-2 rounded-full text-sm font-bold hover:bg-gray-800">
+                Subscribe
+              </button>
+            )}
+            <button 
+              onClick={handleShare}
+              className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"
+              title="Share Application"
+            >
+              <Share2 size={20} />
+            </button>
+          </div>
+        </div>
+
+        <div className="border-b border-gray-200 mb-8">
+          <div className="flex gap-8">
+            <button className="pb-4 border-b-2 border-black font-bold text-sm">Videos</button>
+            <button className="pb-4 text-gray-500 font-bold text-sm hover:text-black">Playlists</button>
+            <button className="pb-4 text-gray-500 font-bold text-sm hover:text-black">About</button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8 pb-20">
+          {videos.map(video => (
+            <VideoCard 
+              key={video.id} 
+              video={video} 
+              onClick={() => onVideoClick(video)} 
+              onOpenProfile={onOpenProfile}
+            />
+          ))}
+          {videos.length === 0 && (
+            <div className="col-span-full py-20 text-center text-gray-400">
+              <Video size={48} className="mx-auto mb-4 opacity-20" />
+              <p>No videos uploaded yet.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const NotificationDropdown = ({ notifications, onClose }: { notifications: NotificationData[], onClose: () => void }) => {
   const markAsRead = async (notifId: string) => {
     try {
@@ -107,7 +266,7 @@ const NotificationDropdown = ({ notifications, onClose }: { notifications: Notif
   );
 };
 
-const Navbar = ({ onSearch, onOpenStudio }: { onSearch: (q: string) => void, onOpenStudio: () => void }) => {
+const Navbar = ({ onSearch, onOpenStudio, onOpenProfile }: { onSearch: (q: string) => void, onOpenStudio: () => void, onOpenProfile: (id: string) => void }) => {
   const { user, signIn, signOut } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
@@ -124,13 +283,19 @@ const Navbar = ({ onSearch, onOpenStudio }: { onSearch: (q: string) => void, onO
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  const handleShareApp = () => {
+    const url = window.location.origin;
+    navigator.clipboard.writeText(url);
+    alert('Application link copied to clipboard! Share it with your friends.');
+  };
+
   return (
     <nav className="fixed top-0 left-0 right-0 h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-50">
       <div className="flex items-center gap-4">
         <button className="p-2 hover:bg-gray-100 rounded-full">
           <Menu size={20} />
         </button>
-        <div className="flex items-center gap-1 text-red-600 font-bold text-xl tracking-tighter">
+        <div className="flex items-center gap-1 text-red-600 font-bold text-xl tracking-tighter cursor-pointer" onClick={() => window.location.reload()}>
           <Video size={28} fill="currentColor" />
           <span>TubeGen</span>
         </div>
@@ -156,6 +321,13 @@ const Navbar = ({ onSearch, onOpenStudio }: { onSearch: (q: string) => void, onO
       </div>
 
       <div className="flex items-center gap-2">
+        <button 
+          onClick={handleShareApp}
+          className="p-2 hover:bg-gray-100 rounded-full text-gray-600"
+          title="Share Application"
+        >
+          <Share2 size={20} />
+        </button>
         {user ? (
           <>
             <button 
@@ -179,8 +351,19 @@ const Navbar = ({ onSearch, onOpenStudio }: { onSearch: (q: string) => void, onO
               </button>
               {showNotifs && <NotificationDropdown notifications={notifications} onClose={() => setShowNotifs(false)} />}
             </div>
-            <button onClick={signOut} className="ml-2">
+            <button 
+              onClick={() => onOpenProfile(user.uid)} 
+              className="ml-2"
+              title="View Profile"
+            >
               <img src={user.photoURL || ''} alt="User" className="w-8 h-8 rounded-full border border-gray-200" />
+            </button>
+            <button 
+              onClick={signOut}
+              className="p-2 hover:bg-gray-100 rounded-full text-gray-500"
+              title="Sign Out"
+            >
+              <LogOut size={20} />
             </button>
           </>
         ) : (
@@ -197,11 +380,13 @@ const Navbar = ({ onSearch, onOpenStudio }: { onSearch: (q: string) => void, onO
   );
 };
 
-const Sidebar = () => {
+const Sidebar = ({ onOpenProfile }: { onOpenProfile: (id: string) => void }) => {
+  const { user } = useAuth();
   const items = [
     { icon: Home, label: 'Home', active: true },
     { icon: Compass, label: 'Explore' },
     { icon: PlaySquare, label: 'Subscriptions' },
+    { icon: User, label: 'Your Channel', onClick: () => user && onOpenProfile(user.uid) },
     { icon: Clock, label: 'History' },
   ];
 
@@ -210,6 +395,7 @@ const Sidebar = () => {
       {items.map((item) => (
         <button
           key={item.label}
+          onClick={item.onClick}
           className={cn(
             "w-full flex items-center gap-6 px-4 py-2.5 rounded-lg hover:bg-gray-100 transition-colors",
             item.active && "bg-gray-100 font-medium"
@@ -237,7 +423,7 @@ const Sidebar = () => {
   );
 };
 
-const VideoCard = ({ video, onClick }: { video: VideoData, onClick: () => void }) => {
+const VideoCard = ({ video, onClick, onOpenProfile }: { video: VideoData, onClick: () => void, onOpenProfile?: (id: string) => void }) => {
   return (
     <motion.div 
       layout
@@ -258,14 +444,32 @@ const VideoCard = ({ video, onClick }: { video: VideoData, onClick: () => void }
         </div>
       </div>
       <div className="flex gap-3">
-        <div className="w-9 h-9 rounded-full bg-gray-200 flex-shrink-0 overflow-hidden">
+        <div 
+          className="w-9 h-9 rounded-full bg-gray-200 flex-shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+          onClick={(e) => {
+            if (onOpenProfile) {
+              e.stopPropagation();
+              onOpenProfile(video.authorId);
+            }
+          }}
+        >
           <img src={`https://picsum.photos/seed/${video.authorId}/100/100`} alt="" referrerPolicy="no-referrer" />
         </div>
         <div>
           <h3 className="font-semibold text-sm line-clamp-2 mb-1 leading-tight">{video.title}</h3>
-          <p className="text-xs text-gray-500 mb-0.5">{video.authorName}</p>
+          <p 
+            className="text-xs text-gray-500 mb-0.5 hover:text-black transition-colors cursor-pointer"
+            onClick={(e) => {
+              if (onOpenProfile) {
+                e.stopPropagation();
+                onOpenProfile(video.authorId);
+              }
+            }}
+          >
+            {video.authorName}
+          </p>
           <p className="text-xs text-gray-500">
-            {video.views.toLocaleString()} views • {new Date(video.createdAt?.seconds * 1000).toLocaleDateString()}
+            {(video.views || 0).toLocaleString()} views • {new Date(video.createdAt?.seconds * 1000).toLocaleDateString()}
           </p>
         </div>
       </div>
@@ -413,7 +617,7 @@ const CreatorStudio = ({ onClose }: { onClose: () => void }) => {
   );
 };
 
-const VideoPlayer = ({ video, onClose }: { video: VideoData, onClose: () => void }) => {
+const VideoPlayer = ({ video, onClose, onOpenProfile }: { video: VideoData, onClose: () => void, onOpenProfile: (id: string) => void }) => {
   const { user } = useAuth();
   const [comments, setComments] = useState<CommentData[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -421,6 +625,16 @@ const VideoPlayer = ({ video, onClose }: { video: VideoData, onClose: () => void
   const [isReading, setIsReading] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [subId, setSubId] = useState<string | null>(null);
+  const [channel, setChannel] = useState<ChannelData | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'channels', video.authorId), (doc) => {
+      if (doc.exists()) {
+        setChannel(doc.data() as ChannelData);
+      }
+    });
+    return () => unsubscribe();
+  }, [video.authorId]);
 
   useEffect(() => {
     const q = query(collection(db, `videos/${video.id}/comments`), orderBy('createdAt', 'desc'));
@@ -452,13 +666,20 @@ const VideoPlayer = ({ video, onClose }: { video: VideoData, onClose: () => void
   const handleToggleSubscription = async () => {
     if (!user) return;
     try {
+      const channelRef = doc(db, 'channels', video.authorId);
       if (isSubscribed && subId) {
         await deleteDoc(doc(db, 'subscriptions', subId));
+        await updateDoc(channelRef, {
+          subscriberCount: Math.max(0, (channel?.subscriberCount || 0) - 1)
+        });
       } else {
         await addDoc(collection(db, 'subscriptions'), {
           subscriberId: user.uid,
           creatorId: video.authorId,
           createdAt: Timestamp.now()
+        });
+        await updateDoc(channelRef, {
+          subscriberCount: (channel?.subscriberCount || 0) + 1
         });
       }
     } catch (error) {
@@ -508,12 +729,15 @@ const VideoPlayer = ({ video, onClose }: { video: VideoData, onClose: () => void
 
           <div className="flex items-center justify-between py-4 border-y border-gray-100 mb-6">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden">
+              <div 
+                className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden cursor-pointer"
+                onClick={() => onOpenProfile(video.authorId)}
+              >
                 <img src={`https://picsum.photos/seed/${video.authorId}/100/100`} alt="" />
               </div>
-              <div>
+              <div className="cursor-pointer" onClick={() => onOpenProfile(video.authorId)}>
                 <p className="font-bold text-sm">{video.authorName}</p>
-                <p className="text-xs text-gray-500">1.2M subscribers</p>
+                <p className="text-xs text-gray-500">{channel?.subscriberCount || 0} subscribers</p>
               </div>
               {user && user.uid !== video.authorId && (
                 <button 
@@ -539,8 +763,16 @@ const VideoPlayer = ({ video, onClose }: { video: VideoData, onClose: () => void
                   <ThumbsUp size={18} className="rotate-180" />
                 </button>
               </div>
-              <button className="bg-gray-100 p-2 rounded-full hover:bg-gray-200">
-                <Send size={18} />
+              <button 
+                onClick={() => {
+                  const url = window.location.origin;
+                  navigator.clipboard.writeText(url);
+                  alert('Application link copied to clipboard!');
+                }}
+                className="bg-gray-100 p-2 rounded-full hover:bg-gray-200"
+                title="Share Application"
+              >
+                <Share2 size={18} />
               </button>
             </div>
           </div>
@@ -673,6 +905,7 @@ const NearbyCreators = () => {
 export default function App() {
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<VideoData | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -696,8 +929,8 @@ export default function App() {
   return (
     <AuthProvider>
       <div className="min-h-screen bg-white text-gray-900 font-sans">
-        <Navbar onSearch={handleSearch} onOpenStudio={() => setIsStudioOpen(true)} />
-        <Sidebar />
+        <Navbar onSearch={handleSearch} onOpenStudio={() => setIsStudioOpen(true)} onOpenProfile={setSelectedChannelId} />
+        <Sidebar onOpenProfile={setSelectedChannelId} />
         
         <main className="pt-20 lg:ml-64 px-4 pb-20">
           <div className="max-w-[1800px] mx-auto">
@@ -713,7 +946,12 @@ export default function App() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-4 gap-y-8">
               {videos.map(video => (
-                <VideoCard key={video.id} video={video} onClick={() => setSelectedVideo(video)} />
+                <VideoCard 
+                  key={video.id} 
+                  video={video} 
+                  onClick={() => setSelectedVideo(video)} 
+                  onOpenProfile={setSelectedChannelId}
+                />
               ))}
               {/* Fallback mock videos if empty */}
               {videos.length === 0 && Array.from({ length: 10 }).map((_, i) => (
@@ -734,7 +972,15 @@ export default function App() {
 
         <AnimatePresence>
           {isStudioOpen && <CreatorStudio onClose={() => setIsStudioOpen(false)} />}
-          {selectedVideo && <VideoPlayer video={selectedVideo} onClose={() => setSelectedVideo(null)} />}
+          {selectedVideo && <VideoPlayer video={selectedVideo} onClose={() => setSelectedVideo(null)} onOpenProfile={setSelectedChannelId} />}
+          {selectedChannelId && (
+            <ProfilePage 
+              channelId={selectedChannelId} 
+              onClose={() => setSelectedChannelId(null)} 
+              onVideoClick={setSelectedVideo}
+              onOpenProfile={setSelectedChannelId}
+            />
+          )}
         </AnimatePresence>
 
         <AIAssistant />
