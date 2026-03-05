@@ -21,6 +21,7 @@
         "photoURL": { "type": "string" },
         "bannerURL": { "type": "string" },
         "bio": { "type": "string" },
+        "contactEmail": { "type": "string" },
         "subscriberCount": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" }
       },

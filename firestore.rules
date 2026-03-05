@@ -13,6 +13,16 @@ service cloud.firestore {
     // - bio: string
     // - createdAt: timestamp (required)
     //
+    // Collection: channels
+    // - uid: string (required)
+    // - displayName: string (required)
+    // - photoURL: string
+    // - bannerURL: string
+    // - bio: string
+    // - contactEmail: string
+    // - subscriberCount: number
+    // - createdAt: timestamp (required)
+    //
     // Collection: videos
     // - id: string (required)
     // - title: string (required)
@@ -67,11 +77,14 @@ service cloud.firestore {
     }
 
     function isValidVideo(data) {
-      return data.keys().hasAll(['id', 'title', 'videoUrl', 'authorId', 'createdAt']) &&
+      return data.keys().hasAll(['title', 'videoUrl', 'authorId', 'createdAt']) &&
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.videoUrl is string &&
+             data.videoUrl is string && data.videoUrl.size() > 0 && data.videoUrl.size() < 1000 &&
              data.authorId == request.auth.uid &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             (!('isShort' in data) || data.isShort is bool) &&
+             (!('description' in data) || (data.description is string && data.description.size() < 5000)) &&
+             (!('thumbnailUrl' in data) || (data.thumbnailUrl is string && data.thumbnailUrl.size() < 1000));
     }
 
     function isValidComment(data) {

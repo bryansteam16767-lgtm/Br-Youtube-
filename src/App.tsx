@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Menu, Video, Bell, User, Home, Compass, PlaySquare, Clock, ThumbsUp, MessageSquare, Send, Sparkles, Wand2, Mic, Volume2, Share2, Camera, Edit3, LogOut } from 'lucide-react';
+import { Search, Menu, Video, Bell, User, Home, Compass, PlaySquare, Clock, ThumbsUp, MessageSquare, Send, Sparkles, Wand2, Mic, Volume2, Share2, Camera, Edit3, LogOut, Upload, Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { geminiService } from './services/geminiService';
-import { db, collection, query, orderBy, onSnapshot, addDoc, Timestamp, OperationType, handleFirestoreError, updateDoc, doc, where, limit, getDocs, deleteDoc, getDoc } from './firebase';
+import { db, collection, query, orderBy, onSnapshot, addDoc, Timestamp, OperationType, handleFirestoreError, updateDoc, doc, where, limit, getDocs, deleteDoc, getDoc, storage, ref, uploadBytesResumable, getDownloadURL } from './firebase';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -25,6 +25,7 @@ interface VideoData {
   authorName: string;
   views: number;
   likes: number;
+  isShort?: boolean;
   createdAt: any;
   tags: string[];
 }
@@ -63,6 +64,7 @@ interface ChannelData {
   photoURL: string;
   bannerURL?: string;
   bio?: string;
+  contactEmail?: string;
   subscriberCount?: number;
   createdAt: any;
 }
@@ -74,6 +76,8 @@ const ProfilePage = ({ channelId, onClose, onVideoClick, onOpenProfile }: { chan
   const [isEditing, setIsEditing] = useState(false);
   const [editBio, setEditBio] = useState('');
   const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [activeTab, setActiveTab] = useState<'videos' | 'about'>('videos');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'channels', channelId), (doc) => {
@@ -82,6 +86,7 @@ const ProfilePage = ({ channelId, onClose, onVideoClick, onOpenProfile }: { chan
         setChannel(data);
         setEditBio(data.bio || '');
         setEditName(data.displayName || '');
+        setEditEmail(data.contactEmail || '');
       }
     });
     return () => unsubscribe();
@@ -99,7 +104,8 @@ const ProfilePage = ({ channelId, onClose, onVideoClick, onOpenProfile }: { chan
     try {
       await updateDoc(doc(db, 'channels', channelId), {
         displayName: editName,
-        bio: editBio
+        bio: editBio,
+        contactEmail: editEmail
       });
       setIsEditing(false);
     } catch (error) {
@@ -150,6 +156,12 @@ const ProfilePage = ({ channelId, onClose, onVideoClick, onOpenProfile }: { chan
                   className="text-sm text-gray-600 border border-gray-200 rounded p-2 w-full outline-none focus:border-black"
                   placeholder="Tell us about your channel..."
                 />
+                <input 
+                  value={editEmail} 
+                  onChange={e => setEditEmail(e.target.value)}
+                  className="text-sm text-gray-600 border border-gray-200 rounded p-2 w-full outline-none focus:border-black"
+                  placeholder="Contact Email (e.g. your@email.com)"
+                />
                 <div className="flex gap-2">
                   <button onClick={handleUpdateProfile} className="bg-black text-white px-4 py-1 rounded-full text-sm font-bold">Save</button>
                   <button onClick={() => setIsEditing(false)} className="bg-gray-100 px-4 py-1 rounded-full text-sm font-bold">Cancel</button>
@@ -159,7 +171,10 @@ const ProfilePage = ({ channelId, onClose, onVideoClick, onOpenProfile }: { chan
               <>
                 <h1 className="text-2xl sm:text-3xl font-bold mb-1">{channel.displayName}</h1>
                 <p className="text-sm text-gray-500 mb-2">@channel_{channel.uid.slice(0, 5)} • {channel.subscriberCount || 0} subscribers • {videos.length} videos</p>
-                <p className="text-sm text-gray-600 max-w-2xl">{channel.bio || 'No bio yet.'}</p>
+                <p className="text-sm text-gray-600 max-w-2xl mb-1">{channel.bio || 'No bio yet.'}</p>
+                {channel.contactEmail && (
+                  <p className="text-xs text-blue-600 font-medium">Contact: {channel.contactEmail}</p>
+                )}
               </>
             )}
           </div>
@@ -189,28 +204,90 @@ const ProfilePage = ({ channelId, onClose, onVideoClick, onOpenProfile }: { chan
 
         <div className="border-b border-gray-200 mb-8">
           <div className="flex gap-8">
-            <button className="pb-4 border-b-2 border-black font-bold text-sm">Videos</button>
-            <button className="pb-4 text-gray-500 font-bold text-sm hover:text-black">Playlists</button>
-            <button className="pb-4 text-gray-500 font-bold text-sm hover:text-black">About</button>
+            <button 
+              onClick={() => setActiveTab('videos')}
+              className={cn("pb-4 font-bold text-sm transition-colors", activeTab === 'videos' ? "border-b-2 border-black text-black" : "text-gray-500 hover:text-black")}
+            >
+              Videos
+            </button>
+            <button 
+              onClick={() => setActiveTab('about')}
+              className={cn("pb-4 font-bold text-sm transition-colors", activeTab === 'about' ? "border-b-2 border-black text-black" : "text-gray-500 hover:text-black")}
+            >
+              About
+            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8 pb-20">
-          {videos.map(video => (
-            <VideoCard 
-              key={video.id} 
-              video={video} 
-              onClick={() => onVideoClick(video)} 
-              onOpenProfile={onOpenProfile}
-            />
-          ))}
-          {videos.length === 0 && (
-            <div className="col-span-full py-20 text-center text-gray-400">
-              <Video size={48} className="mx-auto mb-4 opacity-20" />
-              <p>No videos uploaded yet.</p>
-            </div>
-          )}
-        </div>
+        {activeTab === 'videos' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8 pb-20">
+            {videos.map(video => (
+              <VideoCard 
+                key={video.id} 
+                video={video} 
+                onClick={() => onVideoClick(video)} 
+                onOpenProfile={onOpenProfile}
+              />
+            ))}
+            {videos.length === 0 && (
+              <div className="col-span-full py-20 text-center text-gray-400">
+                <Video size={48} className="mx-auto mb-4 opacity-20" />
+                <p>No videos uploaded yet.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="max-w-2xl py-8 space-y-8 pb-20">
+            <section>
+              <h3 className="text-lg font-bold mb-4">Description</h3>
+              <p className="text-gray-600 whitespace-pre-wrap">{channel.bio || 'No description provided.'}</p>
+            </section>
+            
+            <section className="pt-8 border-t border-gray-100">
+              <h3 className="text-lg font-bold mb-4">Details</h3>
+              <div className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
+                    <Bell size={20} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">{channel.subscriberCount || 0} subscribers</p>
+                    <p className="text-xs text-gray-500">Total channel reach</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
+                    <Video size={20} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">{videos.length} videos</p>
+                    <p className="text-xs text-gray-500">Content uploaded</p>
+                  </div>
+                </div>
+                {channel.contactEmail && (
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
+                      <User size={20} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold">{channel.contactEmail}</p>
+                      <p className="text-xs text-gray-500">Business inquiries & contact</p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
+                    <Clock size={20} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">Joined {new Date(channel.createdAt?.seconds * 1000).toLocaleDateString()}</p>
+                    <p className="text-xs text-gray-500">Member since</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -266,11 +343,15 @@ const NotificationDropdown = ({ notifications, onClose }: { notifications: Notif
   );
 };
 
-const Navbar = ({ onSearch, onOpenStudio, onOpenProfile }: { onSearch: (q: string) => void, onOpenStudio: () => void, onOpenProfile: (id: string) => void }) => {
+const Navbar = ({ initialQuery, onSearch, onOpenStudio, onOpenProfile }: { initialQuery: string, onSearch: (q: string) => void, onOpenStudio: () => void, onOpenProfile: (id: string) => void }) => {
   const { user, signIn, signOut } = useAuth();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
   const [showNotifs, setShowNotifs] = useState(false);
+
+  useEffect(() => {
+    setSearchQuery(initialQuery);
+  }, [initialQuery]);
 
   useEffect(() => {
     if (!user) return;
@@ -332,10 +413,16 @@ const Navbar = ({ onSearch, onOpenStudio, onOpenProfile }: { onSearch: (q: strin
           <>
             <button 
               onClick={onOpenStudio}
-              className="p-2 hover:bg-gray-100 rounded-full flex items-center gap-2 text-sm font-medium"
+              className="hidden md:flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-full text-sm font-bold hover:bg-red-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
+            >
+              <Upload size={18} />
+              <span>Upload</span>
+            </button>
+            <button 
+              onClick={onOpenStudio}
+              className="p-2 hover:bg-gray-100 rounded-full flex items-center gap-2 text-sm font-medium md:hidden"
             >
               <Video size={20} />
-              <span className="hidden sm:inline">Create</span>
             </button>
             <div className="relative">
               <button 
@@ -424,39 +511,54 @@ const Sidebar = ({ onOpenProfile }: { onOpenProfile: (id: string) => void }) => 
 };
 
 const VideoCard = ({ video, onClick, onOpenProfile }: { video: VideoData, onClick: () => void, onOpenProfile?: (id: string) => void }) => {
+  const isShort = video.isShort;
+
   return (
     <motion.div 
       layout
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="cursor-pointer group"
+      className={cn("cursor-pointer group", isShort && "max-w-[240px]")}
       onClick={onClick}
     >
-      <div className="relative aspect-video rounded-xl overflow-hidden bg-gray-100 mb-3">
+      <div className={cn(
+        "relative rounded-xl overflow-hidden bg-gray-100 mb-3",
+        isShort ? "aspect-[9/16]" : "aspect-video"
+      )}>
         <img 
           src={video.thumbnailUrl} 
           alt={video.title} 
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           referrerPolicy="no-referrer"
         />
-        <div className="absolute bottom-2 right-2 bg-black/80 text-white text-[10px] px-1 rounded font-medium">
-          10:00
-        </div>
+        {!isShort && (
+          <div className="absolute bottom-2 right-2 bg-black/80 text-white text-[10px] px-1 rounded font-medium">
+            10:00
+          </div>
+        )}
+        {isShort && (
+          <div className="absolute top-2 left-2 bg-red-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-lg">
+            <Sparkles size={10} />
+            SHORTS
+          </div>
+        )}
       </div>
       <div className="flex gap-3">
-        <div 
-          className="w-9 h-9 rounded-full bg-gray-200 flex-shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-          onClick={(e) => {
-            if (onOpenProfile) {
-              e.stopPropagation();
-              onOpenProfile(video.authorId);
-            }
-          }}
-        >
-          <img src={`https://picsum.photos/seed/${video.authorId}/100/100`} alt="" referrerPolicy="no-referrer" />
-        </div>
-        <div>
-          <h3 className="font-semibold text-sm line-clamp-2 mb-1 leading-tight">{video.title}</h3>
+        {!isShort && (
+          <div 
+            className="w-9 h-9 rounded-full bg-gray-200 flex-shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={(e) => {
+              if (onOpenProfile) {
+                e.stopPropagation();
+                onOpenProfile(video.authorId);
+              }
+            }}
+          >
+            <img src={`https://picsum.photos/seed/${video.authorId}/100/100`} alt="" referrerPolicy="no-referrer" />
+          </div>
+        )}
+        <div className={cn(isShort && "px-1")}>
+          <h3 className={cn("font-semibold text-sm line-clamp-2 mb-1 leading-tight", isShort && "text-sm")}>{video.title}</h3>
           <p 
             className="text-xs text-gray-500 mb-0.5 hover:text-black transition-colors cursor-pointer"
             onClick={(e) => {
@@ -469,7 +571,7 @@ const VideoCard = ({ video, onClick, onOpenProfile }: { video: VideoData, onClic
             {video.authorName}
           </p>
           <p className="text-xs text-gray-500">
-            {(video.views || 0).toLocaleString()} views • {new Date(video.createdAt?.seconds * 1000).toLocaleDateString()}
+            {(video.views || 0).toLocaleString()} views
           </p>
         </div>
       </div>
@@ -479,10 +581,65 @@ const VideoCard = ({ video, onClick, onOpenProfile }: { video: VideoData, onClic
 
 const CreatorStudio = ({ onClose }: { onClose: () => void }) => {
   const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<'ai' | 'manual'>('ai');
+  
+  // AI State
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<{ video?: string, thumb?: string } | null>(null);
   const [status, setStatus] = useState('');
+
+  // Manual State
+  const [manualTitle, setManualTitle] = useState('');
+  const [manualDesc, setManualDesc] = useState('');
+  const [manualVideoUrl, setManualVideoUrl] = useState('');
+  const [manualThumbUrl, setManualThumbUrl] = useState('');
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [thumbFile, setThumbFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isShort, setIsShort] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [publishSuccess, setPublishSuccess] = useState(false);
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const onDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('video/')) {
+      setVideoFile(file);
+      if (!manualTitle) setManualTitle(file.name.split('.')[0]);
+    }
+  };
+
+  const uploadFile = (file: File, path: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const storageRef = ref(storage, path);
+      const uploadTask = uploadBytesResumable(storageRef, file);
+
+      uploadTask.on('state_changed', 
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          setUploadProgress(progress);
+        }, 
+        (error) => reject(error), 
+        () => {
+          getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
+            resolve(downloadURL);
+          });
+        }
+      );
+    });
+  };
 
   const handleGenerate = async () => {
     if (!prompt) return;
@@ -505,8 +662,9 @@ const CreatorStudio = ({ onClose }: { onClose: () => void }) => {
     }
   };
 
-  const handlePublish = async () => {
+  const handlePublishAI = async () => {
     if (!result?.video || !user) return;
+    setIsPublishing(true);
     try {
       const videoRef = collection(db, 'videos');
       const newVideo = {
@@ -518,6 +676,7 @@ const CreatorStudio = ({ onClose }: { onClose: () => void }) => {
         authorName: user.displayName || 'Anonymous',
         views: 0,
         likes: 0,
+        isShort: false,
         createdAt: Timestamp.now(),
         tags: ['AI', 'Veo', 'Gemini']
       };
@@ -542,75 +701,389 @@ const CreatorStudio = ({ onClose }: { onClose: () => void }) => {
       });
       
       await Promise.all(notificationPromises);
-
-      onClose();
+      setPublishSuccess(true);
+      setTimeout(() => {
+        onClose();
+      }, 2000);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'videos');
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const handlePublishManual = async () => {
+    if (!manualTitle || (!manualVideoUrl && !videoFile) || !user) return;
+    setIsPublishing(true);
+    setUploadProgress(0);
+    try {
+      let finalVideoUrl = manualVideoUrl;
+      let finalThumbUrl = manualThumbUrl;
+
+      if (videoFile) {
+        // Use the /upload endpoint for video files
+        const formData = new FormData();
+        formData.append('video', videoFile);
+        formData.append('title', manualTitle);
+
+        const uploadResult = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/upload');
+          
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const progress = (event.loaded / event.total) * 100;
+              setUploadProgress(progress);
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch (e) {
+                reject(new Error('Invalid response from server'));
+              }
+            } else {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error('Network error during upload'));
+          xhr.send(formData);
+        }) as any;
+
+        finalVideoUrl = uploadResult.video.path;
+      }
+
+      if (thumbFile) {
+        finalThumbUrl = await uploadFile(thumbFile, `thumbnails/${user.uid}/${Date.now()}_${thumbFile.name}`);
+      }
+
+      const videoRef = collection(db, 'videos');
+      const newVideo = {
+        title: manualTitle,
+        description: manualDesc,
+        thumbnailUrl: finalThumbUrl || `https://picsum.photos/seed/${manualTitle}/1280/720`,
+        videoUrl: finalVideoUrl,
+        authorId: user.uid,
+        authorName: user.displayName || 'Anonymous',
+        views: 0,
+        likes: 0,
+        isShort: isShort,
+        createdAt: Timestamp.now(),
+        tags: isShort ? ['Shorts'] : []
+      };
+      const docRef = await addDoc(videoRef, newVideo);
+
+      // Notify subscribers
+      const subsQuery = query(collection(db, 'subscriptions'), where('creatorId', '==', user.uid));
+      const subsSnapshot = await getDocs(subsQuery);
+      
+      const notificationPromises = subsSnapshot.docs.map(subDoc => {
+        const subData = subDoc.data();
+        return addDoc(collection(db, 'notifications'), {
+          userId: subData.subscriberId,
+          type: 'new_video',
+          message: `uploaded a new ${isShort ? 'short' : 'video'}: ${manualTitle}`,
+          videoId: docRef.id,
+          creatorId: user.uid,
+          creatorName: user.displayName || 'Anonymous',
+          read: false,
+          createdAt: Timestamp.now()
+        });
+      });
+      
+      await Promise.all(notificationPromises);
+      setPublishSuccess(true);
+      setTimeout(() => {
+        onClose();
+      }, 2000);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'videos');
+    } finally {
+      setIsPublishing(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl"
       >
-        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <Sparkles className="text-purple-600" />
-            Creator Studio AI
-          </h2>
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Video className="text-red-600" />
+              Creator Studio
+            </h2>
+            <p className="text-xs text-gray-500">Create or upload your content</p>
+          </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full">✕</button>
         </div>
-        
-        <div className="p-6 space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">What video should I create?</label>
-            <textarea
-              className="w-full p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none min-h-[100px]"
-              placeholder="e.g. A futuristic city with flying cars in a cyberpunk style..."
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="aspect-video bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden">
-              {result?.thumb ? (
-                <img src={result.thumb} className="w-full h-full object-cover" alt="Thumbnail" />
-              ) : (
-                <span className="text-xs text-gray-400">Thumbnail Preview</span>
-              )}
-            </div>
-            <div className="aspect-video bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden">
-              {result?.video ? (
-                <video src={result.video} className="w-full h-full object-cover" controls />
-              ) : (
-                <span className="text-xs text-gray-400">Video Preview</span>
-              )}
-            </div>
-          </div>
-
-          {status && <p className="text-sm text-center text-purple-600 font-medium animate-pulse">{status}</p>}
-
-          <div className="flex gap-3">
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating || !prompt}
-              className="flex-1 bg-purple-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isGenerating ? 'Generating...' : <><Wand2 size={20} /> Generate with AI</>}
-            </button>
-            {result?.video && (
-              <button
-                onClick={handlePublish}
-                className="flex-1 bg-black text-white py-3 rounded-xl font-bold"
-              >
-                Publish Video
-              </button>
+        <div className="flex border-b border-gray-100">
+          <button 
+            onClick={() => setActiveTab('ai')}
+            className={cn(
+              "flex-1 py-3 text-sm font-bold transition-colors",
+              activeTab === 'ai' ? "border-b-2 border-black text-black" : "text-gray-500 hover:text-black"
             )}
-          </div>
+          >
+            AI Generation
+          </button>
+          <button 
+            onClick={() => setActiveTab('manual')}
+            className={cn(
+              "flex-1 py-3 text-sm font-bold transition-colors flex items-center justify-center gap-2",
+              activeTab === 'manual' ? "border-b-2 border-black text-black" : "text-gray-500 hover:text-black"
+            )}
+          >
+            <Upload size={16} />
+            Manual Upload
+          </button>
+        </div>
+
+        <div className="p-8 max-h-[70vh] overflow-y-auto">
+          {publishSuccess ? (
+            <div className="flex flex-col items-center justify-center py-12 space-y-4">
+              <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center shadow-inner">
+                <Check size={40} />
+              </div>
+              <div className="text-center">
+                <h3 className="text-2xl font-bold text-gray-900">Successfully Published!</h3>
+                <p className="text-gray-500">Your video is now live on TubeGen AI.</p>
+              </div>
+              <p className="text-xs text-gray-400 animate-pulse">Closing studio...</p>
+            </div>
+          ) : activeTab === 'ai' ? (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-bold mb-2">What should the video be about?</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="A cat playing the piano in space..."
+                    className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-red-500"
+                  />
+                  <button 
+                    onClick={handleGenerate}
+                    disabled={isGenerating || !prompt}
+                    className="bg-black text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isGenerating ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Sparkles size={18} />}
+                    Generate
+                  </button>
+                </div>
+              </div>
+
+              {status && (
+                <div className="p-4 bg-gray-50 rounded-xl flex items-center gap-3 text-sm text-gray-600">
+                  <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse" />
+                  {status}
+                </div>
+              )}
+
+              {result && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase">Thumbnail</p>
+                    <div className="aspect-video rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
+                      {result.thumb ? <img src={result.thumb} alt="Thumbnail" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Camera className="text-gray-300" /></div>}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase">Video Preview</p>
+                    <div className="aspect-video rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
+                      {result.video ? <video src={result.video} controls className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Video className="text-gray-300" /></div>}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {result?.video && (
+                <button 
+                  onClick={handlePublishAI}
+                  disabled={isPublishing}
+                  className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {isPublishing ? 'Publishing...' : 'Publish to Channel'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {!videoFile && !manualVideoUrl ? (
+                <div 
+                  onDragOver={onDragOver}
+                  onDragLeave={onDragLeave}
+                  onDrop={onDrop}
+                  className={cn(
+                    "border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center gap-4 transition-all",
+                    isDragging ? "border-red-500 bg-red-50" : "border-gray-200 hover:border-gray-300 bg-gray-50"
+                  )}
+                >
+                  <div className="w-16 h-16 bg-white rounded-full shadow-sm flex items-center justify-center text-gray-400">
+                    <Upload size={32} />
+                  </div>
+                  <div className="text-center">
+                    <p className="font-bold text-lg">Drag and drop video files to upload</p>
+                    <p className="text-sm text-gray-500">Your videos will be private until you publish them</p>
+                  </div>
+                  <label className="bg-black text-white px-6 py-2.5 rounded-full font-bold text-sm cursor-pointer hover:bg-gray-800 transition-colors">
+                    Select Files
+                    <input 
+                      type="file" 
+                      accept="video/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        setVideoFile(file);
+                        if (file && !manualTitle) setManualTitle(file.name.split('.')[0]);
+                      }}
+                    />
+                  </label>
+                  <div className="flex items-center gap-2 w-full max-w-xs mt-4">
+                    <div className="h-px bg-gray-200 flex-1" />
+                    <span className="text-[10px] text-gray-400 font-bold uppercase">OR PASTE URL</span>
+                    <div className="h-px bg-gray-200 flex-1" />
+                  </div>
+                  <input 
+                    type="text" 
+                    value={manualVideoUrl}
+                    onChange={(e) => setManualVideoUrl(e.target.value)}
+                    placeholder="https://example.com/video.mp4"
+                    className="w-full max-w-md px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-black text-sm text-center"
+                  />
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div className="aspect-video bg-black rounded-xl overflow-hidden relative group">
+                      {videoFile ? (
+                        <video src={URL.createObjectURL(videoFile)} className="w-full h-full object-cover" />
+                      ) : (
+                        <video src={manualVideoUrl} className="w-full h-full object-cover" />
+                      )}
+                      <button 
+                        onClick={() => { setVideoFile(null); setManualVideoUrl(''); }}
+                        className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Title (required)</label>
+                      <input 
+                        type="text" 
+                        value={manualTitle}
+                        onChange={(e) => setManualTitle(e.target.value)}
+                        placeholder="Add a title that describes your video"
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-black"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Description</label>
+                      <textarea 
+                        value={manualDesc}
+                        onChange={(e) => setManualDesc(e.target.value)}
+                        placeholder="Tell viewers about your video"
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-black h-32 resize-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Thumbnail</label>
+                      <div className="grid grid-cols-1 gap-2">
+                        <div 
+                          className={cn(
+                            "aspect-video rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors",
+                            thumbFile || manualThumbUrl ? "border-solid border-gray-200" : "border-gray-200 hover:border-gray-300 bg-gray-50"
+                          )}
+                          onClick={() => document.getElementById('thumbInput')?.click()}
+                        >
+                          {thumbFile ? (
+                            <img src={URL.createObjectURL(thumbFile)} className="w-full h-full object-cover rounded-lg" alt="" />
+                          ) : manualThumbUrl ? (
+                            <img src={manualThumbUrl} className="w-full h-full object-cover rounded-lg" alt="" />
+                          ) : (
+                            <>
+                              <Camera size={24} className="text-gray-400" />
+                              <p className="text-[10px] font-bold text-gray-500">Upload Thumbnail</p>
+                            </>
+                          )}
+                        </div>
+                        <input 
+                          id="thumbInput"
+                          type="file" 
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => setThumbFile(e.target.files?.[0] || null)}
+                        />
+                        <input 
+                          type="text" 
+                          value={manualThumbUrl}
+                          onChange={(e) => setManualThumbUrl(e.target.value)}
+                          placeholder="Or paste thumbnail URL"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-black text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-gray-50 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <PlaySquare size={16} className="text-red-600" />
+                          <span className="text-sm font-bold">Shorts Format</span>
+                        </div>
+                        <input 
+                          type="checkbox" 
+                          checked={isShort}
+                          onChange={(e) => setIsShort(e.target.checked)}
+                          className="w-5 h-5 accent-red-600"
+                        />
+                      </div>
+                      <p className="text-[10px] text-gray-500 leading-relaxed">
+                        If your video is vertical (9:16) and under 60 seconds, it will be automatically categorized as a Short.
+                      </p>
+                    </div>
+
+                    {isPublishing && uploadProgress > 0 && (
+                      <div className="space-y-2 p-4 bg-red-50 rounded-xl">
+                        <div className="flex justify-between text-[10px] font-bold text-red-600 uppercase">
+                          <span>Uploading to secure storage...</span>
+                          <span>{Math.round(uploadProgress)}%</span>
+                        </div>
+                        <div className="w-full bg-red-200 rounded-full h-2 overflow-hidden">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${uploadProgress}%` }}
+                            className="bg-red-600 h-full"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <button 
+                      onClick={handlePublishManual}
+                      disabled={isPublishing || !manualTitle}
+                      className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 shadow-lg shadow-red-200 transition-all disabled:opacity-50 active:scale-[0.98]"
+                    >
+                      {isPublishing ? 'Processing...' : 'Publish Video'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </motion.div>
     </div>
@@ -908,6 +1381,8 @@ export default function App() {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [externalResults, setExternalResults] = useState<any[]>([]);
 
   useEffect(() => {
     const q = query(collection(db, 'videos'), orderBy('createdAt', 'desc'));
@@ -919,42 +1394,151 @@ export default function App() {
 
   const handleSearch = async (q: string) => {
     setSearchQuery(q);
-    if (!q) return;
-    // In a real app, we'd filter Firestore or use Search Grounding to find external videos
-    const externalVideos = await geminiService.searchVideos(q);
-    // Combine or show external results
-    console.log("Search results:", externalVideos);
+    if (!q) {
+      setExternalResults([]);
+      return;
+    }
+    
+    setIsSearching(true);
+    try {
+      // In a real app, we'd filter Firestore or use Search Grounding to find external videos
+      const results = await geminiService.searchVideos(q);
+      setExternalResults(results || []);
+    } catch (error) {
+      console.error("Search error:", error);
+    } finally {
+      setIsSearching(false);
+    }
   };
+
+  const filteredVideos = videos.filter(v => 
+    v.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    v.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    v.authorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    v.tags?.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   return (
     <AuthProvider>
       <div className="min-h-screen bg-white text-gray-900 font-sans">
-        <Navbar onSearch={handleSearch} onOpenStudio={() => setIsStudioOpen(true)} onOpenProfile={setSelectedChannelId} />
+        <Navbar initialQuery={searchQuery} onSearch={handleSearch} onOpenStudio={() => setIsStudioOpen(true)} onOpenProfile={setSelectedChannelId} />
         <Sidebar onOpenProfile={setSelectedChannelId} />
         
         <main className="pt-20 lg:ml-64 px-4 pb-20">
           <div className="max-w-[1800px] mx-auto">
-            <NearbyCreators />
+            {!searchQuery && <NearbyCreators />}
+            
             {/* Tags bar */}
             <div className="flex gap-3 overflow-x-auto pb-6 no-scrollbar">
               {['All', 'AI', 'Veo', 'Gemini', 'Music', 'Gaming', 'Tutorials', 'Vlogs', 'Shorts'].map(tag => (
-                <button key={tag} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium whitespace-nowrap transition-colors">
+                <button 
+                  key={tag} 
+                  onClick={() => handleSearch(tag === 'All' ? '' : tag)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors",
+                    searchQuery === tag || (tag === 'All' && !searchQuery) 
+                      ? "bg-black text-white" 
+                      : "bg-gray-100 hover:bg-gray-200 text-gray-900"
+                  )}
+                >
                   {tag}
                 </button>
               ))}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-4 gap-y-8">
-              {videos.map(video => (
-                <VideoCard 
-                  key={video.id} 
-                  video={video} 
-                  onClick={() => setSelectedVideo(video)} 
-                  onOpenProfile={setSelectedChannelId}
-                />
-              ))}
-              {/* Fallback mock videos if empty */}
-              {videos.length === 0 && Array.from({ length: 10 }).map((_, i) => (
+            {searchQuery && (
+              <div className="mb-8 flex items-center justify-between">
+                <h2 className="text-xl font-bold">Results for "{searchQuery}"</h2>
+                <button 
+                  onClick={() => handleSearch('')}
+                  className="text-sm text-blue-600 font-bold hover:underline"
+                >
+                  Clear Search
+                </button>
+              </div>
+            )}
+
+            {isSearching && (
+              <div className="flex flex-col items-center justify-center py-20 gap-4">
+                <div className="w-10 h-10 border-4 border-gray-200 border-t-red-600 rounded-full animate-spin" />
+                <p className="text-sm text-gray-500 font-medium">Searching the platform and the web...</p>
+              </div>
+            )}
+
+            {/* Shorts Shelf (Only show if not searching or if search matches shorts) */}
+            {!isSearching && filteredVideos.some(v => v.isShort) && (
+              <section className="mb-12">
+                <div className="flex items-center gap-2 mb-4">
+                  <Sparkles className="text-red-600" size={24} />
+                  <h2 className="text-xl font-bold">Shorts</h2>
+                </div>
+                <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
+                  {filteredVideos.filter(v => v.isShort).map(video => (
+                    <div key={video.id} className="flex-shrink-0 w-[200px] sm:w-[240px]">
+                      <VideoCard 
+                        video={video} 
+                        onClick={() => setSelectedVideo(video)} 
+                        onOpenProfile={setSelectedChannelId}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {!isSearching && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-4 gap-y-8">
+                {filteredVideos.filter(v => !v.isShort).map(video => (
+                  <VideoCard 
+                    key={video.id} 
+                    video={video} 
+                    onClick={() => setSelectedVideo(video)} 
+                    onOpenProfile={setSelectedChannelId}
+                  />
+                ))}
+                
+                {/* External Results from Gemini */}
+                {externalResults.map((video, i) => (
+                  <VideoCard 
+                    key={`ext-${i}`} 
+                    video={{
+                      id: `ext-${i}`,
+                      title: video.title,
+                      description: video.description,
+                      thumbnailUrl: video.thumbnailUrl || `https://picsum.photos/seed/ext${i}/1280/720`,
+                      videoUrl: video.videoUrl,
+                      authorId: 'external',
+                      authorName: video.author || 'Web Creator',
+                      views: Math.floor(Math.random() * 1000000),
+                      likes: 0,
+                      createdAt: Timestamp.now(),
+                      tags: video.tags || []
+                    }} 
+                    onClick={() => setSelectedVideo({
+                      id: `ext-${i}`,
+                      title: video.title,
+                      description: video.description,
+                      thumbnailUrl: video.thumbnailUrl || `https://picsum.photos/seed/ext${i}/1280/720`,
+                      videoUrl: video.videoUrl,
+                      authorId: 'external',
+                      authorName: video.author || 'Web Creator',
+                      views: Math.floor(Math.random() * 1000000),
+                      likes: 0,
+                      createdAt: Timestamp.now(),
+                      tags: video.tags || []
+                    })} 
+                  />
+                ))}
+
+                {filteredVideos.length === 0 && externalResults.length === 0 && !isSearching && searchQuery && (
+                  <div className="col-span-full py-20 text-center">
+                    <Search size={48} className="mx-auto mb-4 opacity-20" />
+                    <p className="text-gray-500">No videos found for "{searchQuery}"</p>
+                  </div>
+                )}
+
+                {/* Fallback mock videos if empty and not searching */}
+                {videos.length === 0 && !searchQuery && Array.from({ length: 10 }).map((_, i) => (
                 <div key={i} className="animate-pulse">
                   <div className="aspect-video bg-gray-200 rounded-xl mb-3" />
                   <div className="flex gap-3">
@@ -967,8 +1551,9 @@ export default function App() {
                 </div>
               ))}
             </div>
-          </div>
-        </main>
+          )}
+        </div>
+      </main>
 
         <AnimatePresence>
           {isStudioOpen && <CreatorStudio onClose={() => setIsStudioOpen(false)} />}

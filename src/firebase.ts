@@ -1,12 +1,14 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, collection, onSnapshot, query, where, orderBy, limit, addDoc, getDocs, updateDoc, deleteDoc, setDoc, Timestamp, getDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase SDK
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // Error handling for Firestore
@@ -91,4 +93,5 @@ export {
   doc,
   getDoc
 };
+export { ref, uploadBytesResumable, getDownloadURL };
 export type { User };
